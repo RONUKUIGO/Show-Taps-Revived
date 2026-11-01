@@ -92,7 +92,7 @@
 ```bash
 cd showtaps
 ./gradlew assembleDebug     # CMake + NDK 现场编译 libtaps.so
-./gradlew assembleRelease   # 需要 showtaps/showtaps-a16.jks（见 §6）
+./gradlew assembleRelease   # 签名走环境变量，见 §6（无变量则未签名）
 ```
 
 ### aarch64 主机（本项目的原始开发环境：手机上的 Ubuntu 沙箱）
