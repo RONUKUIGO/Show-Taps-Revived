@@ -87,8 +87,10 @@ cd showtaps
 
 * 工具链：AGP **9.5.0**（内置 Kotlin，不要再加 `org.jetbrains.kotlin.android`）、Gradle **9.8.2**
 * `local.properties` 里写 `sdk.dir=...`
-* release 签名：把 keystore 放到 `showtaps/showtaps-a16.jks`（别名/口令 `showtaps`），
-  不存在时 release 走未签名，不影响编译
+* release 签名：工程里**不放** keystore，只读环境变量
+  `B50_KEYSTORE / B50_STORE_PASS / B50_ALIAS / B50_KEY_PASS`；
+  用维护者的 `wskeys` 包装器注入（见 `HANDOFF.md §6`）。没有这些变量时 release 走未签名，
+  不影响他人克隆编译
 * **aarch64 主机**（如手机上的 Linux 沙箱）：官方 NDK 只提供 x86_64 主机工具链，
   需自己交叉编译 `libtaps.so` 放进 `app/src/main/jniLibs/arm64-v8a/`，再用
   `gradle -PusePrebuiltNative assembleDebug` 跳过 CMake。详见 [`HANDOFF.md`](HANDOFF.md)。
@@ -100,6 +102,8 @@ cd showtaps
 2. 准备触摸数据源：装 [Shizuku](https://shizuku.rikka.app/) 并授权本 App；
    或在 root 环境给本 App 授权 root（走 `su` 直启通道）
 3. 点「启动」，5 秒内点「继续」→ 之后触摸屏幕即可看到位置与轨迹
+
+> Release 包的签名与上游官方包**不同**，首次从上游版本迁移时需要先卸载原版。
 
 ## TODO
 

@@ -133,15 +133,40 @@ gradle -PusePrebuiltNative assembleDebug
 3. 用**同一把 keystore** 签名（见 §6），否则老用户无法覆盖安装
 4. `gh release create vX.Y-a16 --title ... --notes ... app-release.apk`
 
-## 6. 密钥
+## 6. 签名（走项目统一钥匙）
 
-`showtaps/showtaps-a16.jks`（store/key 口令均为 `showtaps`，别名 `showtaps`），
-**不入库**。当前这一份的位置：开发机 `/data/local/tmp/ws/projects/show-taps/showtaps/`，
-另一份交付副本在 `/storage/emulated/0/Tools/LSPilot/outputs/apk/showtaps/` 同级的沙箱目录。
+**不要在本工程里放任何 keystore。** 签名走项目规范 `docs/KEYSTORE.md`：
+一把钥匙 `KeySigned_By_Rinkyu` 供所有需要签名的项目使用，唯一存放点
+`/data/local/tmp/ws/secure/`（root 0700），密码只有加密文件 `.pw.enc`。
 
-> 正式对外发布请换一把自己保管的 keystore，并**永久保存**：一旦丢失，已安装用户只能卸载重装。
+`app/build.gradle` 只读 4 个环境变量，由 `wskeys` 注入：
 
-`app/build.gradle` 已做条件判断：keystore 不存在时 release 走未签名，不影响他人克隆编译。
+| 环境变量 | 含义 |
+|---|---|
+| `B50_KEYSTORE` | `.jks` 绝对路径 |
+| `B50_STORE_PASS` | 密钥库口令 |
+| `B50_ALIAS` | 别名（`KeySigned_By_Rinkyu`） |
+| `B50_KEY_PASS` | 私钥口令 |
+
+```bash
+cd showtaps
+printf '<wskeys 口令>\n' | sh /data/local/tmp/ws/wsk run -- \
+    gradle -PusePrebuiltNative assembleRelease
+```
+（x86_64 开发机上去掉 `-PusePrebuiltNative`。）
+
+签名后必须核验证书指纹：
+
+```bash
+apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+# 期望：CN=Rinkyu, OU=RINIO, O=ROKUNUIGO
+# SHA-256 42:60:4E:D2:85:E0:6D:7A:B4:75:F3:DE:3B:82:7E:DF:03:66:73:71:BC:73:E2:D2:CD:D9:AC:2C:A9:D2:65:F9
+```
+
+没有环境变量时 release 构建**走未签名**（clone 下来照样能编，方便 PR/CI），
+需要可安装的包时再用 `wskeys run` 或者事后 `wskeys sign-apk <in> <out>` 重签。
+
+> 已发布的 `v5.1-a16` 用的就是这把钥匙。以后发版必须继续用它，否则老用户只能卸载重装。
 
 ## 7. 验证清单（改动后请重跑）
 

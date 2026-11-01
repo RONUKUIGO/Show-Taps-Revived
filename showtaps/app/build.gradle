@@ -36,16 +36,24 @@ android {
         }
     }
 
-    // 本地自签名，供 release 构建安装测试用。发布请换自己的 keystore。
-    // keystore 不入库：不存在时 release 构建走未签名（CI/他人克隆也能编过）
-    def a16Keystore = file("../showtaps-a16.jks")
+    // ---- 发布签名 ----
+    // 项目规范见 docs/KEYSTORE.md：一把钥匙（KeySigned_By_Rinkyu）供所有项目使用，
+    // 工程里不放密钥，只读环境变量；用 `wskeys run -- gradle ...` 注入：
+    //   B50_KEYSTORE / B50_STORE_PASS / B50_ALIAS / B50_KEY_PASS
+    def envKeystore  = System.getenv("B50_KEYSTORE")
+    def envStorePass = System.getenv("B50_STORE_PASS")
+    def envKeyAlias  = System.getenv("B50_ALIAS")
+    def envKeyPass   = System.getenv("B50_KEY_PASS")
+    def hasEnvKey = envKeystore != null && envStorePass != null && envKeyPass != null
 
     signingConfigs {
-        a16 {
-            storeFile a16Keystore
-            storePassword "showtaps"
-            keyAlias "showtaps"
-            keyPassword "showtaps"
+        if (hasEnvKey) {
+            releaseKey {
+                storeFile file(envKeystore)
+                storePassword envStorePass
+                keyAlias envKeyAlias ?: "KeySigned_By_Rinkyu"
+                keyPassword envKeyPass
+            }
         }
     }
 
@@ -53,8 +61,8 @@ android {
         release {
             minifyEnabled true
             shrinkResources false
-            if (a16Keystore.exists()) {
-                signingConfig signingConfigs.a16
+            if (hasEnvKey) {
+                signingConfig signingConfigs.releaseKey
             }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
