@@ -1,8 +1,7 @@
 package show.taps
 
 import android.content.Context
-import show.taps.server.GlobalSettings
-import show.taps.server.ViewModeType
+import show.taps.overlay.GlobalSettings
 
 const val keySize = "PREF_KEY_TOUCH_POINT_SIZE"
 
@@ -17,8 +16,6 @@ const val keyAlpha = "PREF_KEY_COLOR_ALPHA"
 const val keyColorPrefix = "PREF_KEY_COLOR_"
 
 const val touchEventDevName = "TOUCH_EVENT_DEV_NAME"
-
-const val keyViewType = "PREF_KEY_VIEW_TYPE"
 
 
 /* ------------------------------------------------------------------------------- */
@@ -42,22 +39,19 @@ fun getAlpha() = pref().getInt(keyAlpha, 100)
 
 fun getLastDevName(): String? = pref().getString(touchEventDevName, null)
 
-fun getViewType() = pref().getInt(keyViewType, ViewModeType.MODE_2041)
-
 
 /* ------------------------------------------------------------------------------- */
 
-fun setTouchPointSize(i : Int) = pref().edit().putInt(keySize, i).apply()
 
-fun setTouchPathDisappearanceTime(i : Int) = pref().edit().putInt(keyTime, i).apply()
+fun setTouchPointSize(i: Int) = pref().edit().putInt(keySize, i).apply()
 
-fun setStrokeCircle(i : Int) = pref().edit().putInt(keyStrokeCircle, i).apply()
+fun setTouchPathDisappearanceTime(i: Int) = pref().edit().putInt(keyTime, i).apply()
 
-fun setStrokeLine(i : Int) = pref().edit().putInt(keyStrokeLine, i).apply()
+fun setStrokeCircle(i: Int) = pref().edit().putInt(keyStrokeCircle, i).apply()
 
-fun setAlpha(i : Int) = pref().edit().putInt(keyAlpha, i).apply()
+fun setStrokeLine(i: Int) = pref().edit().putInt(keyStrokeLine, i).apply()
 
-fun setViewType(i : Int) = pref().edit().putInt(keyViewType, i).apply()
+fun setAlpha(i: Int) = pref().edit().putInt(keyAlpha, i).apply()
 
 fun setLastDevName(value: String?) {
     pref().edit().putString(touchEventDevName, value).apply()
@@ -70,7 +64,7 @@ fun setLastDevName(value: String?) {
 fun getColorList(): IntArray {
     val pref = pref()
     val res = IntArray(GlobalSettings.COLOR_ARRAY_LENGTH)
-    for(i in 0 until GlobalSettings.COLOR_ARRAY_LENGTH){
+    for (i in 0 until GlobalSettings.COLOR_ARRAY_LENGTH) {
         res[i] = pref.getInt("$keyColorPrefix$i", defaultColors[i])
     }
     return res

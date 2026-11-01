@@ -1,17 +1,45 @@
 package show.taps.server
 
-import android.os.SystemClock
-import android.util.Log
 import androidx.annotation.Keep
 import show.taps.DevInfo
 
-private const val TAG = "NativeLib"
-
+/**
+ * JNI 入口。原生线程只会回调 a()/b()/c() 三个静态方法，
+ * 上层通过 [sink] 注入具体实现（AIDL 回调 / socket 写出）。
+ *
+ * 注意：加载库不再放在 init 里 —— root 通道在 app_process 中运行，
+ * 需要由调用方显式指定 .so 的绝对路径（见 [loadFrom]）。
+ */
 @Keep
 object NativeLib {
 
-    init {
-        System.loadLibrary("taps")
+    interface Sink {
+        fun onSlotState(slot: Int, down: Boolean)
+        fun onSlotMove(slot: Int, x: Float, y: Float)
+        fun onSync()
+    }
+
+    @Volatile
+    var sink: Sink? = null
+
+    private var loaded = false
+
+    @JvmStatic
+    @Synchronized
+    fun load() {
+        if (!loaded) {
+            System.loadLibrary("taps")
+            loaded = true
+        }
+    }
+
+    @JvmStatic
+    @Synchronized
+    fun loadFrom(path: String) {
+        if (!loaded) {
+            System.load(path)
+            loaded = true
+        }
     }
 
     @JvmStatic
@@ -28,46 +56,19 @@ object NativeLib {
 
     @Keep
     @JvmStatic
-    fun a(slot: Int, down: Boolean){
-        // Log.d(TAG, "a() called with: slot = $slot, down = $down")
-        val mainView = FloatManager.view as MainView
-        if(mainView.listPressedPoint[slot].pressing == down){
-            return
-        }
-        mainView.listPressedPoint[slot].pressing = down
-        if(!down){
-            mainView.listPressedPoint[slot].releaseTime = SystemClock.uptimeMillis()
-            mainView.list[mainView.i].x = -10000f
-        }
+    fun a(slot: Int, down: Boolean) {
+        sink?.onSlotState(slot, down)
     }
 
     @Keep
     @JvmStatic
-    fun b(slot: Int, x: Float, y: Float){
-        val mainView = FloatManager.view as MainView
-
-        Log.d(TAG, "b: ${mainView.resources.displayMetrics.widthPixels}")
-
-        val i = mainView.i
-        mainView.list[i].x = x
-        mainView.list[i].y = y
-        mainView.list[i].pointerId = slot
-        mainView.list[i].time = SystemClock.uptimeMillis()
-
-        mainView.listPressedPoint[slot].x = mainView.list[i].x
-        mainView.listPressedPoint[slot].y = mainView.list[i].y
-
-        if(++mainView.i >= mainView.list.size){
-            mainView.i = 0
-        }
+    fun b(slot: Int, x: Float, y: Float) {
+        sink?.onSlotMove(slot, x, y)
     }
 
     @Keep
     @JvmStatic
-    fun c(){
-        if(FloatManager.initialized){
-            FloatManager.view.postInvalidate()
-        }
+    fun c() {
+        sink?.onSync()
     }
-
 }

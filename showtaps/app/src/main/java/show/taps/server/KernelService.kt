@@ -2,242 +2,183 @@ package show.taps.server
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.os.Process
+import android.os.RemoteException
 import android.os.SystemClock
-import android.provider.Settings
 import android.util.Log
 import show.taps.BuildConfig
-import show.taps.DevInfo
+import show.taps.ITouchCallback
 import show.taps.KernelInterface
 import java.io.File
-import java.lang.RuntimeException
 import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
 private const val TAG = "KernelService"
 
+/**
+ * Shizuku 用户服务：以 shell(uid 2000) 身份运行在独立进程里，只负责
+ * 「读 /dev/input/eventX → 把归一化坐标回调给 App」，不再创建任何窗口。
+ *
+ * Android 16 起 AOSP 的 Session 构造函数要求调用 openSession 的 pid 必须存在于
+ * AMS 的 ProcessMap 中（否则 IllegalStateException: Unknown pid=…），
+ * 所以 app_process 进程已经无法再 addView —— 覆盖层改由 App 进程绘制。
+ */
 class KernelService(private val context: Context) : KernelInterface.Stub() {
 
-    private val handler = Handler(Looper.getMainLooper())
+    @Volatile
+    private var running = false
 
+    @Volatile
+    private var callback: ITouchCallback? = null
+
+    @Volatile
     private var lastActive = SystemClock.uptimeMillis()
 
-    private var isRunning = false
+    private val sink = object : NativeLib.Sink {
+
+        override fun onSlotState(slot: Int, down: Boolean) {
+            send { it.onSlotState(slot, down) }
+        }
+
+        override fun onSlotMove(slot: Int, x: Float, y: Float) {
+            send { it.onSlotMove(slot, x, y) }
+        }
+
+        override fun onSync() {
+            send { it.onSync() }
+        }
+
+        /** 回调异常（App 进程已死）时自动收摊，避免原生线程持续报错 */
+        private inline fun send(block: (ITouchCallback) -> Unit) {
+            val cb = callback ?: return
+            try {
+                block(cb)
+            } catch (e: RemoteException) {
+                Log.e(TAG, "callback dead, stop reading", e)
+                runCatching { stop() }
+            } catch (t: Throwable) {
+                Log.e(TAG, "callback error", t)
+            }
+        }
+    }
 
     @SuppressLint("PrivateApi")
-    private fun fixVivo(){
+    private fun fixVivo() {
         // VIVO android 10
-        try{
+        try {
             val field = Class.forName("android.view.VivoViewRootImplImpl")
                 .getDeclaredField("SUPPORT_PCSHARE")
             field.isAccessible = true
             field.set(null, false)
-        }catch (e: Exception){
-            Log.e(TAG, "fixVivo: ${e.message}")
+        } catch (e: Exception) {
+            Log.d(TAG, "fixVivo: ${e.message}")
         }
     }
 
     @SuppressLint("PrivateApi")
-    private fun fixLge(){
+    private fun fixLge() {
         // LG android 11
-        try{
+        try {
             val field = Class.forName("com.lge.os.Build\$VERSION")
                 .getDeclaredField("IS_OS_UPGRADED")
             field.isAccessible = true
             field.set(null, false)
-        }catch (e: Exception){
-            Log.e(TAG, "fixLge11: ${e.message}")
+        } catch (e: Exception) {
+            Log.d(TAG, "fixLge: ${e.message}")
         }
     }
 
-    @SuppressLint("SoonBlockedPrivateApi", "DiscouragedPrivateApi", "PrivateApi")
-    private fun fixCommon(){
-        try{
-            val holderClazz = Class.forName("android.provider.Settings\$ContentProviderHolder")
-
-            val contentProviderField = holderClazz.getDeclaredField("mContentProvider")
-            contentProviderField.isAccessible = true
-
-            val list = listOf(Settings.Secure::class.java, Settings.System::class.java, Settings.Global::class.java)
-            for(clazz in list){
-                try {
-                    val sProviderHolderField = clazz.getDeclaredField("sProviderHolder")
-                    sProviderHolderField.isAccessible = true
-                    val holder = sProviderHolderField.get(clazz) // Settings$ContentProviderHolder
-                    contentProviderField.set(holder, UnknownContentProvider())
-
-                }catch (e: Exception){
-                    Log.e(TAG, "fixCommon: clazz=$clazz ${e.message}")
-                }
-            }
-
-        }catch (e: Exception){
-            Log.e(TAG, "fixCommon: ", e)
-        }
-
-    }
-
-    init{
-        /*if(Process.myUid() == Process.ROOT_UID){
-            Process.setUid(Process.SHELL_UID)
-        }*/
-
+    init {
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            try{
+            try {
                 Log.e(TAG, "exception: ", e)
-                val path = File("/data/local/tmp/show.taps/")
-                path.mkdirs()
-                val file = File(path, "crash_${System.currentTimeMillis()}.txt")
+                val dir = File("/data/local/tmp/show.taps/")
+                dir.mkdirs()
+                val file = File(dir, "crash_${System.currentTimeMillis()}.txt")
                 file.createNewFile()
                 val info = "pid=${Process.myPid()},uid=${Process.myUid()},t_name=${t.name}"
                 file.writeText(info + "\n" + Log.getStackTraceString(e))
-            }catch (e: Exception){
+            } catch (e: Exception) {
                 Log.e(TAG, "loge: ", e)
-            }finally {
+            } finally {
                 exitProcess(0)
             }
         }
 
-        Log.d(TAG, "init!")
+        Log.d(TAG, "init! sdk=${android.os.Build.VERSION.SDK_INT}")
+
         val pidPath = File("/data/local/tmp/show.taps/server_pid/")
-        if(!pidPath.exists()){
+        if (!pidPath.exists()) {
             pidPath.mkdirs()
-        }else{
-            if(pidPath.isFile){
+        } else {
+            if (pidPath.isFile) {
                 pidPath.delete()
                 pidPath.mkdirs()
             }
-            pidPath.listFiles()?.forEach {
-                runCatching {
-                    it.delete()
-                }
-            }
+            pidPath.listFiles()?.forEach { runCatching { it.delete() } }
         }
-        val liveFile = File(pidPath, Process.myPid().toString())
-        liveFile.createNewFile()
+        runCatching { File(pidPath, Process.myPid().toString()).createNewFile() }
 
-        fixCommon()
+        SettingsHack.install()
         fixVivo()
         fixLge()
 
-        thread(name = "avoid_forgetting_exit"){
-            while(true){
+        // 不读触摸时超时退出；被卸载时立即退出
+        thread(name = "avoid_forgetting_exit") {
+            while (true) {
                 SystemClock.sleep(5000)
 
-                if(!isRunning && SystemClock.uptimeMillis() - lastActive >= 120 * 1000){
-                    Log.d(TAG, "isRunning == false!! timeout!!")
-                    exitProcess(0)
-                }
-
-                if(!liveFile.exists()){
-                    Log.d(TAG, "avoid_multi_process: ${liveFile.absolutePath}")
+                if (!running && SystemClock.uptimeMillis() - lastActive >= 120 * 1000) {
+                    Log.d(TAG, "idle timeout, exit")
                     exitProcess(0)
                 }
 
                 @SuppressLint("SdCardPath")
-                if(!File("/data/data/${BuildConfig.APPLICATION_ID}/").exists()){
-                    Log.d(TAG, "uninstall: ${liveFile.absolutePath}")
+                if (!File("/data/data/${BuildConfig.APPLICATION_ID}/").exists()) {
+                    Log.d(TAG, "app uninstalled, exit")
                     exitProcess(0)
                 }
             }
         }
     }
 
-    private fun getInputPath(): Array<DevInfo> {
-        lastActive = SystemClock.uptimeMillis()
-        return NativeLib.getInputPath().toTypedArray()
-    }
-
     @Synchronized
-    override fun start(dev: String?, colorArray: IntArray, touchPointSize: Int, dismissTime: Int,
-                       circleStroke: Int, lineStroke: Int, colorAplha: Int, mode: Int): Boolean {
-        val inputPath = getInputPath()
-        if(inputPath.isEmpty()) {
-            Log.e(TAG, "start: inputPath isEmpty.")
+    override fun start(dev: String?, cb: ITouchCallback?): Boolean {
+        lastActive = SystemClock.uptimeMillis()
+        if (running) stop()
+
+        NativeLib.load()
+        val path = InputDevices.pick(dev) ?: return false
+
+        callback = cb
+        NativeLib.sink = sink
+        if (!NativeLib.start(path)) {
+            Log.e(TAG, "start: native start failed, path=$path")
+            callback = null
+            NativeLib.sink = null
             return false
         }
-        if(dev != null){
-            inputPath.forEach{
-                if(it.name == dev) {
-                    it.weight += 100000
-                }
-            }
-        }
-        var path = inputPath[0].path
-        var weight = inputPath[0].weight
-        inputPath.forEach {
-            if(it.weight > weight){
-                weight = it.weight
-                path = it.path
-            }
-        }
-        lastActive = SystemClock.uptimeMillis()
-        for(i in 0 until GlobalSettings.COLOR_ARRAY_LENGTH){
-            GlobalSettings.colorArray[i] = colorArray[i]
-        }
-        GlobalSettings.touchPointSize = touchPointSize
-        GlobalSettings.pathFadeTime = dismissTime
-        GlobalSettings.strokeCircle = circleStroke
-        GlobalSettings.strokeLine = lineStroke
-        if(NativeLib.start(path)){
-            handler.post {
-                FloatManager.init(context, mode)
-                FloatManager.view.alpha = colorAplha / 100f
-            }
-            isRunning = true
-            handler.postDelayed(stopRunnable, GlobalSettings.WAIT_CONTINUE_TIME)
-            return true
-        }
-        return false
+        running = true
+        Log.d(TAG, "start: ok, path=$path")
+        return true
     }
 
-    override fun isRunning() : Boolean{
-        lastActive = SystemClock.uptimeMillis()
-        return isRunning
-    }
-
-    private val stopRunnable = Runnable {
-        throw RuntimeException("not continue.")
-    }
-
-    override fun continueUse() {
-        handler.removeCallbacks(stopRunnable)
-    }
+    override fun isRunning(): Boolean = running
 
     @Synchronized
     override fun stop() {
         lastActive = SystemClock.uptimeMillis()
-        NativeLib.stop()
-        isRunning = false
+        if (running) {
+            runCatching { NativeLib.stop() }
+        }
+        running = false
+        NativeLib.sink = null
+        callback = null
+        Log.d(TAG, "stop")
     }
 
     override fun exit() {
-        handler.post {
-            throw RuntimeException("exit!")
-        }
+        stop()
+        exitProcess(0)
     }
-
-    override fun updateInfo(touchPointSize: Int, dismissTime: Int,
-                            circleStroke: Int, lineStroke: Int, colorAplha: Int) {
-        lastActive = SystemClock.uptimeMillis()
-        GlobalSettings.touchPointSize = touchPointSize
-        GlobalSettings.pathFadeTime = dismissTime
-        GlobalSettings.strokeCircle = circleStroke
-        GlobalSettings.strokeLine = lineStroke
-        if(FloatManager.initialized){
-            handler.post{
-                FloatManager.view.alpha = colorAplha / 100f
-            }
-        }
-    }
-
-    override fun updateColors(colorArray: IntArray) {
-        lastActive = SystemClock.uptimeMillis()
-        for(i in 0 until GlobalSettings.COLOR_ARRAY_LENGTH){
-            GlobalSettings.colorArray[i] = colorArray[i]
-        }
-    }
-
 }

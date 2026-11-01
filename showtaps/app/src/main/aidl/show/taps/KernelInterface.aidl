@@ -1,23 +1,18 @@
 package show.taps;
 
-import show.taps.DevInfo;
+import show.taps.ITouchCallback;
 
 interface KernelInterface {
-    boolean start(@nullable String dev, in int[] colors,
-                int touchPointSize, int dismissTime,
-                int circleStroke, int lineStroke, int colorAlpha,
-                int viewMode);
+    /**
+     * 开始读取触摸设备。
+     * @param dev 优先使用的 /dev/input/eventX， 表示自动挑选
+     * @param callback 触摸数据回调（App 进程里的实现）
+     */
+    boolean start(@nullable String dev, in ITouchCallback callback);
 
     boolean isRunning();
-
-    void continueUse();
 
     void stop();
 
     oneway void exit();
-
-    oneway void updateInfo(int touchPointSize, int dismissTime, int circleStroke, int lineStroke, int colorAlpha);
-
-    oneway void updateColors(in int[] colors);
-
 }

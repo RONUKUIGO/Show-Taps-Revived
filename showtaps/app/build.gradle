@@ -1,86 +1,121 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
-    id 'kotlin-parcelize'
 }
+
+// 本沙箱是 aarch64 宿主，官方 NDK 只提供 x86_64 主机工具链。
+// 因此允许用 -PusePrebuiltNative 跳过 CMake，直接打包 app/src/main/jniLibs 下的预编译 .so
+// （正常 x86_64 开发机上不加这个参数，仍由 CMake+NDK 现场编译）
+def usePrebuiltNative = project.hasProperty('usePrebuiltNative')
 
 android {
     namespace 'show.taps'
-    compileSdk 34
-
+    compileSdk 36
+    ndkVersion '28.2.13676358'
 
     defaultConfig {
         applicationId "show.taps"
         minSdk 29
-        targetSdk 34
-        versionCode 8
-        versionName "5.0"
+        targetSdk 36
+        versionCode 9
+        versionName "5.1-a16"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters 'arm64-v8a'
         }
-        externalNativeBuild {
-            cmake {
-                cppFlags "-fvisibility=hidden -fvisibility-inlines-hidden -Wl,-Bsymbolic -Wl,--exclude-libs,ALL -s"
-                arguments "-DCMAKE_BUILD_TYPE=Release"
+        if (!usePrebuiltNative) {
+            externalNativeBuild {
+                cmake {
+                    cppFlags "-fvisibility=hidden -fvisibility-inlines-hidden -Wl,-Bsymbolic -Wl,--exclude-libs,ALL -s"
+                    arguments "-DCMAKE_BUILD_TYPE=Release"
+                    // Android 15+ 的 16KB page size 设备要求；NDK r28 起支持
+                    arguments "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+                }
             }
         }
+    }
 
+    // 本地自签名，供 release 构建安装测试用。发布请换自己的 keystore。
+    // keystore 不入库：不存在时 release 构建走未签名（CI/他人克隆也能编过）
+    def a16Keystore = file("../showtaps-a16.jks")
+
+    signingConfigs {
+        a16 {
+            storeFile a16Keystore
+            storePassword "showtaps"
+            keyAlias "showtaps"
+            keyPassword "showtaps"
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled true
+            shrinkResources false
+            if (a16Keystore.exists()) {
+                signingConfig signingConfigs.a16
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-
         }
         debug {
-            minifyEnabled true
-            debuggable false
-            applicationIdSuffix ".test"
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-    }
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
-    viewBinding{
-        enable true
-    }
-    buildFeatures{
-        aidl true
-    }
-    externalNativeBuild {
-        cmake {
-            path file('src/main/cpp/CMakeLists.txt')
-            version '3.22.1'
+            minifyEnabled false
+            applicationIdSuffix ""
         }
     }
 
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlin {
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        }
+    }
+
+    viewBinding {
+        enable true
+    }
+    buildFeatures {
+        aidl true
+        buildConfig true
+    }
+
+    if (!usePrebuiltNative) {
+        externalNativeBuild {
+            cmake {
+                // 版本由 local.properties 的 cmake.dir 指定（本机 aarch64 宿主用系统 cmake）
+                path file('src/main/cpp/CMakeLists.txt')
+            }
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // 需要把 .so 解包到 nativeLibraryDir：root 通道用绝对路径 System.load()
+            useLegacyPackaging = true
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
 }
 
 dependencies {
-
-    implementation 'androidx.core:core-ktx:1.9.0'
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'com.google.android.material:material:1.8.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
-
-    implementation "androidx.activity:activity-ktx:1.6.1"
+    implementation 'androidx.core:core-ktx:1.17.0'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'com.google.android.material:material:1.13.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+    implementation 'androidx.activity:activity-ktx:1.11.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.4'
 
     def shizuku_version = "13.1.5"
     implementation "dev.rikka.shizuku:api:$shizuku_version"
     implementation "dev.rikka.shizuku:provider:$shizuku_version"
 
     implementation 'com.github.skydoves:colorpickerview:2.3.0'
-
 }

@@ -50,9 +50,8 @@ fun Activity.openWebBrowser(url: String, pkg: String? = null) {
 fun Activity.copy(content: String): Boolean{
     try{
         val clipboardManager = getSystemService(ClipboardManager::class.java)
-        clipboardManager.primaryClip?.addItem(ClipData.Item(content))
         val label = getString(R.string.app_name)
-        clipboardManager.primaryClip = ClipData.newPlainText(label, content)
+        clipboardManager.setPrimaryClip(ClipData.newPlainText(label, content))
         return true
     }catch (e: Exception){
         Log.e(TAG, "copy: ", e)

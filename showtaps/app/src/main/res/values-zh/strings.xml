@@ -35,4 +35,18 @@
     <string name="_continue">继续</string>
     <string name="tip_change_complete">切换完成, 请再次尝试[启动]</string>
 
+
+    <string name="card_1_tip_overlay">需要「显示在其他应用上层」权限，才能绘制触摸指示层。Android 16 起覆盖层必须由 App 自身进程绘制。</string>
+    <string name="bt_request_overlay_permission">授予悬浮窗权限</string>
+    <string name="card_1_tip_shizuku_permission">Shizuku 正在运行，但还没有授权本 App。点击下方按钮请求权限。</string>
+    <string name="card_1_tip_install_shizuku">未检测到 Shizuku，也没有可用的 root 环境。请安装并启动 Shizuku，或给本 App 授予 root 权限。</string>
+    <string name="card_1_tip_start_root">已检测到 root 环境。点击下方 [ 启动 ] 将通过 su 直接读取触摸设备，无需 Shizuku。</string>
+    <string name="toast_no_privileged_channel">没有可用的 Shizuku 或 root 通道</string>
+    <string name="toast_shizuku_granted">Shizuku 权限已授予</string>
+    <string name="toast_grant_overlay_then_back">请在系统设置里打开悬浮窗权限，然后返回本页面</string>
+    <string name="toast_safety_stopped">未点击「继续」，已自动停止</string>
+    <string name="toast_need_overlay_permission">缺少悬浮窗权限</string>
+    <string name="notif_channel">触摸指示层</string>
+    <string name="notif_running">Show Taps 正在显示触摸位置</string>
+
 </resources>

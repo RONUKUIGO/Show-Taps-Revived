@@ -14,6 +14,14 @@
 
     <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
 
+    <!-- Android 16 适配：覆盖层改由 App 自身进程绘制，因此需要「悬浮窗」权限 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- root 通道通过 127.0.0.1 与提权进程通信 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -24,16 +32,25 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Material3.DynamicColors.DayNight"
         android:name=".App"
-        tools:targetApi="31">
+        tools:targetApi="36">
+
         <activity
             android:name="show.taps.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="show.taps.overlay.OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="touch_indicator_overlay" />
+        </service>
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

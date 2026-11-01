@@ -1,0 +1,19 @@
+# ---- Android / Gradle ----
+*.iml
+.idea/
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+.DS_Store
+
+# ---- 本地签名材料：不要入库 ----
+*.jks
+*.keystore
+
+# ---- 预编译 .so：仅 aarch64 主机的绕行方案，不入库 ----
+# （与 CMake 产物同名，入库会导致正常构建报
+#   "2 files found with path 'lib/arm64-v8a/libtaps.so'"）
+showtaps/app/src/main/jniLibs/

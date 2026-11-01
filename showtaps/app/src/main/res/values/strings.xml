@@ -35,4 +35,18 @@
     <string name="_continue">Continue</string>
     <string name="tip_change_complete">Switch completed, please try [Start] again.</string>
 
+
+    <string name="card_1_tip_overlay">Show Taps needs the "Display over other apps" permission to draw the touch indicator.</string>
+    <string name="bt_request_overlay_permission">Grant overlay permission</string>
+    <string name="card_1_tip_shizuku_permission">Shizuku is running but this app is not authorized yet. Tap the button below to request permission.</string>
+    <string name="card_1_tip_install_shizuku">No Shizuku and no root detected. Install &amp; start Shizuku (or grant root to this app) to continue.</string>
+    <string name="card_1_tip_start_root">Root detected. Tap [Start] below to read the touch device via su — Shizuku is not needed.</string>
+    <string name="toast_no_privileged_channel">No Shizuku or root channel available</string>
+    <string name="toast_shizuku_granted">Shizuku permission granted</string>
+    <string name="toast_grant_overlay_then_back">Please allow "Display over other apps", then come back</string>
+    <string name="toast_safety_stopped">Not confirmed in time, Show Taps stopped</string>
+    <string name="toast_need_overlay_permission">Overlay permission is required</string>
+    <string name="notif_channel">Touch indicator</string>
+    <string name="notif_running">Show Taps is showing the touch position</string>
+
 </resources>
