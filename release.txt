@@ -1,0 +1,33 @@
+Show Taps Revived 1.1.1
+
+【这个版本是什么】
+用 miuix 界面重写的 Show Taps：显示触摸位置，并且支持导入"效果包"来换风格。
+
+【来自哪里】
+· 界面/交互骨架：InstallerX Revived（GPL-3.0，wxxsfxyzm/InstallerX-Revived）
+  4 个 tab 的 miuix 页面、设置页、卡片样式、主题/模糊引擎基本原样借用，
+  所以仓库里还留着大量 InstallerX 的代码与文案。
+· 触摸指示引擎：Show Taps（k3x1n/Android-Show-Taps）→ Show-Taps-Revived（RONUKUIGO）
+  读 /dev/input 的 JNI、Shizuku / root 双通道、覆盖层绘制。
+· 本版本自有：效果包引擎、预设库、配置编辑页、miuix 适配层。
+
+【可能会遗留什么（借用 UI 的代价）】
+1. InstallerX 的业务层没剥干净：安装器/卸载器页面、安装流程、历史记录仍在，
+   只是入口被替换或删掉；仓库体积也因此偏大。
+2. 文案混杂：部分字符串、翻译文件仍是 InstallerX 的。
+3. 临时不可用：设置里的「导出设置 / 还原设置」、关于页的「开放源代码许可」「获取更新」置灰占位。
+4. 关于页大图标目前是 1px 透明占位。
+5. 通知小图标仍是 InstallerX 的 ic_notification_logo。
+
+【1.1.1 变更】
+· 包名改为 com.show.taps.revived，应用名 Show Taps，图标换成 Show Taps 自己的
+· 旧 Material3 界面弃用，只保留 miuix 实现
+· 底栏第 3 格「记录」改为「预设」，右下角 + 可导入预设/效果包（.json / .zip）
+· 新增效果包引擎：press / hold / trail / release 四组图层，sprite / ring / dot 三种类型，
+  曲线支持固定值、起止+缓动、关键帧；混合模式 plus / normal / screen
+· 新增可选「覆盖状态栏」模式（无障碍覆盖层，AOSP 窗口层级 31）
+· 删除：5 秒「继续」安全计时、安装器设置、卸载器设置、网络设置、停用系统安装验证、
+  隐藏桌面图标、忽略电池优化、实验室入口
+· 可用特权页只保留 无特权 / ROOT / Shizuku
+· 修复 release 构建：补 R8 keep 规则（Shizuku 反射类 + serialization 数据类）与 materialkolor 缺类
+· 性能：release 包翻页 p90 11ms / 0% 掉帧（debug 包是 53-65ms / 3-6%，属于 debug 未优化导致）

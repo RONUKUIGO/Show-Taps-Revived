@@ -1,19 +1,35 @@
-# ---- Android / Gradle ----
-*.iml
-.idea/
-.gradle/
+# Gradle & Kotlin build directories (anywhere in the project)
 build/
-captures/
-.externalNativeBuild/
+.gradle/
+.kotlin/
 .cxx/
-local.properties
-.DS_Store
+.externalNativeBuild/
+/captures/
+/docs/superpowers/
 
-# ---- 本地签名材料：不要入库 ----
+# Local configuration & Keystore files
+local.properties
+keystore.properties
+keystore/
 *.jks
 *.keystore
 
-# ---- 预编译 .so：仅 aarch64 主机的绕行方案，不入库 ----
-# （与 CMake 产物同名，入库会导致正常构建报
-#   "2 files found with path 'lib/arm64-v8a/libtaps.so'"）
-showtaps/app/src/main/jniLibs/
+# IntelliJ / Android Studio
+.idea/*
+!.idea/.gitignore
+!.idea/codeStyles/
+!.idea/codeStyles/**
+!.idea/inspectionProfiles/
+!.idea/inspectionProfiles/**
+!.idea/icon.svg
+!.idea/runConfigurations/
+!.idea/runConfigurations/**
+!.idea/vcs.xml
+!.idea/fileTemplates/
+!.idea/fileTemplates/**
+.artifacts/
+
+*.iml
+.DS_Store
+/.agents
+/logs

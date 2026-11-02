@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    无障碍覆盖层配置。只为一个目的：拿到 TYPE_ACCESSIBILITY_OVERLAY 的 WindowToken。
+
+    刻意保持最小能力集：
+      * 不声明 canRequestTouchExplorationMode —— 否则整个系统的触摸会被接管，输入直接坏掉
+      * 不声明 canPerformGestures / canRetrieveWindowContent —— 本服务不读屏、不点按
+      * accessibilityEventTypes 只留窗口状态变化，拿到 service 连接即可，不处理事件
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="false"
+    android:notificationTimeout="100"
+    android:description="@string/st_a11y_service_desc" />

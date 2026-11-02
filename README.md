@@ -1,144 +1,75 @@
-# Show-Taps-Revived
+# Show Taps Revived
 
-在屏幕上显示触摸位置与轨迹（多指、可配色、可调大小/淡出时间）。
+在屏幕上显示触摸位置的工具。这一版把界面换成了 **miuix** 风格，并加上了**效果包**机制：
+触摸指示器不再只有"圆环 + 轨迹"一种画法，可以导入别人写的效果包（贴图 + 曲线）来换风格。
 
-**本项目是 [k3x1n/Android-Show-Taps](https://github.com/k3x1n/Android-Show-Taps) 的复活分支**，
-当前版本 **5.1-a16**，目标是让它在 **Android 16（SDK 36）** 上重新跑起来。
-
-* 许可证：**GPL-3.0**（沿用上游）
-* 上游长期未更新，Android 16 上已经完全无法启动覆盖层，因此另开仓库维护
-* 上游的提交历史、tag（v2.1 / v3.2 / v5.0）都保留在本仓库里
+包名：`com.show.taps.revived`　应用名：Show Taps　许可：GPL-3.0
 
 ---
 
-## 为什么需要适配：Android 16 把「提权进程画窗口」这条路堵死了
+## 这个仓库是什么
 
-AOSP 16 的 `Session` 构造函数新增了一道校验：
+它**不是**从零写的新项目，而是三块东西拼起来的：
 
-```java
-// frameworks/base/services/core/java/com/android/server/wm/Session.java:147
-mProcess = mAtmService.mProcessMap.getProcess(mPid);
-if (mProcess == null) {
-    throw new IllegalStateException("Unknown pid=" + mPid + " uid=" + mUid);
-}
-```
+| 部分 | 来源 | 说明 |
+|---|---|---|
+| 界面 / 交互骨架 | [InstallerX Revived](https://github.com/wxxsfxyzm/InstallerX-Revived)（GPL-3.0） | 4 个 tab 的 miuix 页面、设置页、卡片样式、模糊/主题引擎几乎原样搬来 |
+| 触摸指示引擎 | [Show Taps](https://github.com/k3x1n/Android-Show-Taps) → [Show-Taps-Revived](https://github.com/RONUKUIGO/Show-Taps-Revived)（GPL-3.0） | 读 `/dev/input` 的 JNI、Shizuku / root 双通道、覆盖层绘制 |
+| 本仓库自有代码 | 本仓库 | 效果包引擎（`show/taps/effect/`）、预设库（`show/taps/settings/` + `show/taps/ui/`）、配置编辑页、miuix 适配层 |
 
-也就是说：**凡是不在 AMS ProcessMap 里的进程，`openSession()` 直接抛异常 → 一个窗口都建不出来**。
-Shizuku 用户服务、`app_process`、root shell 全都属于这一类。
+为什么会这样拼：Android 16 起覆盖层只能由 App 自身进程绘制（提权进程 `openSession` 会抛
+`Unknown pid`），原项目那套"提权进程画窗口"的架构彻底不可用；顺手把 UI 也换成了 miuix，
+于是干脆借 InstallerX Revived 的界面骨架来省掉重写。
 
-设备端实测（Android 16 / SDK 36，`app_process` 以 root 运行，逐个尝试 addView）：
+## 期望
 
-| 窗口类型 | 2041 | 2039 | 2038 | 2002 | 2036 |
-|---|---|---|---|---|---|
-| 结果 | ❌ | ❌ | ❌ | ❌ | ❌ |
+**目标是一件小事：让"触摸显示"可以换皮肤，而不只是换颜色和粗细。**
 
-栈顶统一是 `IWindowManager$Stub$Proxy.openSession` → `IllegalStateException: Unknown pid=…`。
-（证据与探针源码见 [`notes/a16-probe.md`](notes/a16-probe.md)、[`notes/WmProbe.java`](notes/WmProbe.java)）
+- 预设（Preset）：纯参数，套用内置绘制规则，零素材
+- 效果包（Pack）：`pack.json` + 图片素材 + 时间曲线，声明式描述按下 / 按住 / 拖尾 / 抬起四组动效
+- **包只能声明，不能执行代码**：没有 JS、没有 shader、没有表达式求值，导入陌生包不会带来执行风险
 
-## 改成了什么架构
+效果包规范见 `docs/pack-spec-v1.md`（在 Show-Taps-Revived 仓库的 `design/` 下）。
 
-```
-┌──────────── App 进程（AMS 认识的真实进程）────────────┐
-│ OverlayService(前台服务) → WindowManager.addView       │
-│   TYPE_APPLICATION_OVERLAY + SYSTEM_ALERT_WINDOW       │
-│ MainView 绘制轨迹线与圆环                               │
-└────────▲──────────────────────────────┬───────────────┘
-         │ ITouchCallback (oneway AIDL)  │ TCP 回环 + 一次性 token
-┌────────┴──────────────┐   ┌───────────▼──────────────────┐
-│ Shizuku 用户服务       │   │ root 守护进程                 │
-│ KernelService(uid 2000)│   │ RootServer(app_process as root)│
-└───────────────────────┘   └──────────────────────────────┘
-        读 /dev/input/eventX        读 /dev/input/eventX
-```
+> 本仓库**不提供任何效果包**。包由使用者自行制作或导入。
 
-* **覆盖层回到 App 自身进程**（唯一可行的位置），提权进程只负责读触摸设备并回传坐标。
-* 触摸数据源不变：JNI 把 `EV_ABS` 归一化成 `x/abs_max`、`y/abs_max` 后传上层。
-* **双通道**：优先 Shizuku（无需 root），没有 Shizuku 时自动走 `su`/root 直启。
-* 顺带去掉了「必须用改过的 android.jar」这个编译期依赖：
-  `UnknownContentProvider`（实现隐藏接口 `IContentProvider`）改成
-  `java.lang.reflect.Proxy` 动态代理（`server/SettingsHack.kt`）。
-  作用不变：让 `Settings.Secure/System/Global` 的静态读取在提权进程里返回默认值
-  （否则框架内部读到 `SecurityException: Unable to find app for caller …` 会直接崩）。
+## 已知遗留（都是"借 UI"带来的）
 
-## 当前状态（初步恢复功能）
-
-已验证（真机 Android 16 / SDK 36）：
-
-* Shizuku 通道：用户服务以 shell 身份起、挑中 `/dev/input/event7 (goodix_ts)`、事件回传正常
-* 覆盖层：`ty=APPLICATION_OVERLAY` 正常显示
-* 绘制：注入触摸事件后截图里能定位到圆环与轨迹（像素级核对过位置与直径）
-* 5 秒「继续」安全计时：不确认会自动停止
-* release 构建（R8 混淆）同样正常
-
-未验证 / 已知限制：
-
-* **root 直启通道**：代码已实现，但测试机的 KernelSU 未授权本 App，`su` 返回 `Permission denied`，未端到端跑通
-* 覆盖层**盖不住状态栏**（`TYPE_APPLICATION_OVERLAY` 层级在状态栏之下；A16 上原方案的 2041 已不可用）
-* 通知（`POST_NOTIFICATIONS`）未主动申请，前台服务通知可能不显示，服务本身不受影响
+1. **InstallerX 的业务逻辑没剥干净**：`data/` `domain/` `di/` 还在，安装器/卸载器页面、安装流程、
+   历史记录等都还能跑，只是入口大多被换掉或删掉。想真正瘦身要按 `AGENTS.md` 里的路径删。
+2. **文案混杂**：部分字符串仍是 InstallerX 的（通知、权限说明、安装流程），
+   中文/英文翻译文件也还带着原项目的条目。
+3. **临时不可用的功能**：设置里的「导出设置 / 还原设置」、关于页的「开放源代码许可」「获取更新」，
+   目前都置灰，属于占位。
+4. **关于页大图标是 1px 透明图**：正式图标还没定。
+5. **通知小图标**仍是 InstallerX 的 `ic_notification_logo`，语义不太对。
 
 ## 构建
 
-需要：**JDK 17+、Android SDK 36、NDK 28.2.13676358、CMake 3.22+**。
-
 ```bash
-cd showtaps
-./gradlew assembleDebug      # 或 assembleRelease
+# 需要 Android SDK + JDK 21
+./gradlew :app:assembleStableRelease
+# 产物：app/build/outputs/apk/Stable/release/app-Stable-release.apk
 ```
 
-* 工具链：AGP **9.5.0**（内置 Kotlin，不要再加 `org.jetbrains.kotlin.android`）、Gradle **9.8.2**
-* `local.properties` 里写 `sdk.dir=...`
-* release 签名：工程里**不放** keystore，只读环境变量
-  `B50_KEYSTORE / B50_STORE_PASS / B50_ALIAS / B50_KEY_PASS`；
-  用维护者的 `wskeys` 包装器注入（见 `HANDOFF.md §6`）。没有这些变量时 release 走未签名，
-  不影响他人克隆编译
-* **aarch64 主机**（如手机上的 Linux 沙箱）：官方 NDK 只提供 x86_64 主机工具链，
-  需自己交叉编译 `libtaps.so` 放进 `app/src/main/jniLibs/arm64-v8a/`，再用
-  `gradle -PusePrebuiltNative assembleDebug` 跳过 CMake。详见 [`HANDOFF.md`](HANDOFF.md)。
-  （`jniLibs/` 不入库，避免与 CMake 产物重名冲突）
+* 只编一个 flavor（`Stable`）。同时编三个 flavor 会让 sqlite 的 native 库重复加载而失败。
+* 默认 `applicationId = com.show.taps.revived`，可用 `-PAPP_ID=xxx` 覆盖（方便共存调试）。
+* release 走 R8。`app/proguard-rules.pro` 里有必须的 keep 规则：
+  Shizuku 用户服务 / root 守护进程是**按类名反射加载**的，`kotlinx.serialization` 的数据类字段名参与
+  JSON 编解码，这两类都不能被混淆或裁剪。
+* 没有配置签名时会退回 debug 签名（方便本地验证）。
 
-## 用法
+## 权限说明
 
-1. 安装后首次打开 → 授予「显示在其他应用上层」权限
-2. 准备触摸数据源：装 [Shizuku](https://shizuku.rikka.app/) 并授权本 App；
-   或在 root 环境给本 App 授权 root（走 `su` 直启通道）
-3. 点「启动」，5 秒内点「继续」→ 之后触摸屏幕即可看到位置与轨迹
+| 权限 | 为什么 |
+|---|---|
+| 显示在其他应用上层（SYSTEM_ALERT_WINDOW） | 画触摸指示层 |
+| 前台服务（specialUse） | 让覆盖层所在进程存活 |
+| 通知（POST_NOTIFICATIONS） | 前台服务通知（可关，不影响功能） |
+| Shizuku 或 root | 读 `/dev/input`；没有它就只能显示自身 App 内的触摸 |
+| 无障碍服务（可选，默认关） | 把指示器画到状态栏之上（AOSP 窗口层级 31） |
 
-> Release 包的签名与上游官方包**不同**，首次从上游版本迁移时需要先卸载原版。
+## 许可
 
-## TODO
-
-* [ ] root 通道端到端验证（KernelSU / Magisk 授权后）
-* [ ] 覆盖层能否向上越过状态栏（需要另想办法，或退化为「状态栏下方」）
-* [ ] 快捷磁贴开关
-* [ ] PNG 图标/自定义光标
-* [ ] 通知里的「停止」按钮
-
-## 上游
-
-* 原项目：https://github.com/k3x1n/Android-Show-Taps （GPL-3.0）
-* 本仓库：https://github.com/RONUKUIGO/Show-Taps-Revived
-
----
-
-# Show-Taps-Revived（中文）
-
-在屏幕上显示触摸位置与轨迹。**这是 [k3x1n/Android-Show-Taps](https://github.com/k3x1n/Android-Show-Taps)
-的复活分支**，当前版本 **5.1-a16**，让它重新支持 **Android 16（SDK 36）**。
-
-**为什么另开仓库**：上游自 5.0 之后长期未更新，而 Android 16 上原架构已经完全不可用，
-因此作为独立分支继续维护；上游提交历史与 tag 都保留着。
-
-**Android 16 的根因**：AOSP 16 的 `Session` 构造函数要求调用 `openSession()` 的 pid 必须存在于
-AMS 的 ProcessMap，否则抛 `IllegalStateException("Unknown pid=…")`。
-Shizuku 用户服务 / app_process / root shell 都不在其中 → **完全无法创建窗口**。
-所以本版本把覆盖层搬回 **App 自身进程**（`TYPE_APPLICATION_OVERLAY` + 悬浮窗权限），
-提权进程只负责读 `/dev/input` 并通过回调/回环把坐标送回来。
-
-**已实现**：Shizuku 通道（真机验证）· root/su 直启通道（代码完成，未端到端验证）·
-AGP 9.5 / Gradle 9.8.2 / compileSdk 36 / NDK 28.2（16KB page size）· edge-to-edge 适配 ·
-去掉「改过的 android.jar」依赖（隐藏接口改用 `java.lang.reflect.Proxy`）。
-
-**已知限制**：覆盖层盖不住状态栏（A16 上 2041 类型已不可用）；root 通道待实测。
-
-构建：`cd showtaps && ./gradlew assembleDebug`（JDK 17+ / SDK 36 / NDK 28.2 / CMake 3.22+）。
-细节看 [`HANDOFF.md`](HANDOFF.md)，A16 取证看 [`notes/a16-probe.md`](notes/a16-probe.md)。
+GPL-3.0。界面来自 InstallerX Revived，触摸引擎来自 Show Taps / Show-Taps-Revived，均为 GPL-3.0，
+保留原版权声明。

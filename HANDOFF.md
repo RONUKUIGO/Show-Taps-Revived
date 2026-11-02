@@ -1,218 +1,210 @@
-# HANDOFF · 接手必读（2026-11-01）
+# HANDOFF · Show Taps Revived 1.1.1
 
-> 状态：**初步恢复功能**。Android 16 上能跑起来、能画、能停；root 通道未端到端验证。
-> 版本：`5.1-a16`（versionCode 9），基线是上游 `fbc9097`（tag v5.0 之后唯一提交）。
+> 交接时间：2026-11-02 23:55　状态：**可装、可跑、已提交**，唯一未做的是「用项目钥匙重签」
+> 代码正本：`/data/local/tmp/ws/projects/irx-ui/`（沙箱 git，最新提交 `9ba77ed`）
+> 上一版交接（2026-11-02 00:45，还叫 irx-ui 样本库）已被本文取代
 
 ---
 
-## 1. 一页速览
+## 0. 一页速览
 
-| 项 | 内容 |
+| 项 | 值 |
 |---|---|
-| 上游 | `k3x1n/Android-Show-Taps`（GPL-3.0） |
-| 本仓库 | `RONUKUIGO/Show-Taps-Revived` |
-| 为什么要分叉 | 上游长期停更；Android 16 上原架构（提权进程画窗口）**已彻底不可用** |
-| 关键结论 | AOSP 16 的 `Session` 构造函数要求 `openSession()` 的调用者 pid 在 AMS ProcessMap 里，否则抛 `IllegalStateException("Unknown pid=…")` |
-| 解决方式 | 覆盖层搬回 **App 自身进程**（`TYPE_APPLICATION_OVERLAY` + 悬浮窗权限）；提权进程只读 `/dev/input` 并回传 |
-| 触摸数据源 | Shizuku 用户服务（uid 2000，优先）；`su` + `app_process`（root 兜底） |
-| 验证过的环境 | 小米平板 23117RK66C / Android 16 / SDK 36 / 1440×3200(覆盖 1080×2400) / 本机 Shizuku API 由 **Sui**（zygisk 模块）提供 |
+| 应用名 | **Show Taps** |
+| 包名 | **`com.show.taps.revived`** |
+| 版本 | **1.1.1 / versionCode 10101**（规则：`major*10000 + minor*100 + patch`） |
+| 入口 Activity | `com.rosan.installer.ui.activity.SettingsActivity`（清单里的 LAUNCHER） |
+| 构建产物 | `app/build/outputs/apk/Stable/release/app-Stable-release.apk`（5.9 MB） |
+| 归档副本 | `Tools/LSPilot/outputs/apk/show-taps-revived/show-taps-revived-v1.1.1.apk` |
+| 签名 | **debug 签名**（未用 `KeySigned_By_Rinkyu`，见 §7） |
+| 设备现状 | 已装 1.1.1，可正常启动，无崩溃 |
+| 图形栈 | 100% miuix（旧 Material3 已写死弃用） |
 
-## 2. 目录
+---
 
-```
-.
-├── README.md                 面向用户：是什么、怎么装、怎么构建
-├── HANDOFF.md                本文件
-├── notes/
-│   ├── a16-probe.md          A16 取证：AOSP 源码 + 设备端探针原始输出
-│   └── WmProbe.java          app_process 探针源码（可复现「Unknown pid」）
-├── LICENSE                   GPL-3.0（沿用上游，勿改）
-└── showtaps/                 Android 工程
-    └── app/src/main/
-        ├── aidl/show/taps/   KernelInterface.aidl / ITouchCallback.aidl / DevInfo.aidl
-        ├── cpp/              taps.cpp（读 /dev/input、ioctl 取 absinfo）、detect_devices.h
-        ├── java/show/taps/
-        │   ├── MainActivity.kt        权限引导 + 启动/停止 + 设置面板
-        │   ├── Pref.kt / Goto.kt / DevInfo.kt / OnSeekBarChangeListener.kt
-        │   ├── App.kt                 App.running StateFlow
-        │   ├── overlay/               ← 覆盖层（App 进程）
-        │   │   ├── OverlayService.kt  前台服务(FGS specialUse) + 5s「继续」安全计时
-        │   │   ├── OverlayController.kt addView(TYPE_APPLICATION_OVERLAY)
-        │   │   ├── MainView.kt        绘制（rotation 换算、轨迹/圆环）
-        │   │   └── GlobalSettings.kt  绘制参数（进程内，无需跨进程同步）
-        │   ├── touch/                 ← 触摸数据通道
-        │   │   ├── TouchSink.kt       onSlotState/onSlotMove/onSync
-        │   │   ├── TouchSources.kt    通道调度：Shizuku → root 兜底
-        │   │   ├── ShizukuTouchSource.kt bindUserService + ITouchCallback
-        │   │   └── RootTouchSource.kt su -c app_process + 127.0.0.1 回环
-        │   └── server/                ← 提权侧（不建窗口！）
-        │       ├── KernelService.kt   Shizuku 用户服务
-        │       ├── RootServer.kt      root 守护进程（app_process 入口）
-        │       ├── NativeLib.kt       JNI 桥（a/b/c 回调 → Sink）
-        │       ├── InputDevices.kt    挑选触摸设备
-        │       └── SettingsHack.kt    Proxy 版 Settings 中和
-        └── res/                      布局/字符串/图标（含通知小图标）
-```
+## 1. 这是什么
 
-## 3. 数据流（为什么这么拆）
+三块拼起来的，不是从零写的：
+
+| 部分 | 来源 | 位置 |
+|---|---|---|
+| 界面骨架 | [InstallerX Revived](https://github.com/wxxsfxyzm/InstallerX-Revived)（GPL-3.0） | `app/src/main/java/com/rosan/installer/**` |
+| 触摸引擎 | Show Taps（k3x1n）→ [Show-Taps-Revived](https://github.com/RONUKUIGO/Show-Taps-Revived)（GPL-3.0） | `app/src/main/java/show/taps/{overlay,touch,server}` + `aidl/show/taps/*` + `jniLibs/arm64-v8a/libtaps.so` |
+| 自有 | 效果包引擎、预设库、配置/编辑页、miuix 适配 | `show/taps/{effect,settings,ui}` |
+
+**为什么拼**：Android 16 起提权进程（Shizuku 用户服务 / root 的 `app_process`）调用
+`IWindowManager.openSession` 会抛 `IllegalStateException("Unknown pid=…")`（AMS ProcessMap 里没有它），
+所以"提权进程画窗口"的老架构彻底不可用，覆盖层必须回到 App 自己进程；
+既然要重写这一层，就顺手把 UI 换成 miuix，界面骨架直接借 InstallerX Revived。
+
+---
+
+## 2. 目录地图
+
+### 2.1 自有代码（改这里不用管 IRX 逻辑）
 
 ```
-/dev/input/event7 ──(JNI, 提权进程)──> NativeLib.a/b/c
-                                        │
-                         ┌──────────────┴───────────────┐
-                         │ Shizuku: ITouchCallback(binder)│ root: TCP 行协议 S/M/Y
-                         └──────────────┬───────────────┘
-                                        ▼
-                            MainView.onSlotState/onSlotMove/onSync
-                                        ▼
-                              postInvalidate → onDraw
+show/taps/
+├── StEngine.kt                 引擎门面：apply(config) → GlobalSettings + 效果包渲染器
+├── StRuntime.kt                宿主里的运行期状态（running StateFlow / packageName）
+├── effect/                     ★ 效果包引擎
+│   ├── StPack.kt               数据模型 + 曲线 + 7 种缓动
+│   ├── StPackParser.kt         pack.json → StPack（带定位的报错）
+│   ├── StPackRenderer.kt       时间→曲线→Canvas 绘制
+│   └── StPackHolder.kt         当前生效渲染器（进程内单例，MainView 每帧读）
+├── settings/
+│   ├── StConfig.kt             一套绘制配置（含 packId）
+│   ├── StConfigStore.kt        配置持久化（filesDir/st_configs.json）
+│   ├── StPreset.kt             预设/效果包条目
+│   ├── StPresetStore.kt        预设库：导入 json/zip、解压素材、持久化
+│   └── StSettings.kt           引擎级开关（目前只有「覆盖状态栏」）
+├── overlay/                    覆盖层（App 进程）
+│   ├── OverlayService.kt       前台服务 + 通知（带「停止」按钮）
+│   ├── OverlayController.kt    双宿主：APP(2038) / ACCESSIBILITY(2032) + 400ms 防抖重挂
+│   ├── TapOverlayAccessibilityService.kt  只为拿 2032 的 WindowToken，不读屏不接管触摸
+│   ├── MainView.kt             内置绘制 + 有包时让位给 StPackRenderer
+│   └── GlobalSettings.kt       内置绘制参数
+├── touch/                      TouchSink + Shizuku/root 双通道
+└── ui/                         miuix 页面：配置列表 / 配置编辑 / 预设
 ```
 
-* 归一化在 JNI 里做：`x = event->value / abs_x.maximum`，`y` 同理 → 上层只认 0..1。
-* 一个 `SYN_REPORT` 触发一次 `onSync()` → 一次 `postInvalidate()`。
-* 绘制参数（颜色/大小/淡出/透明度）都在 App 进程的 `GlobalSettings`，**不再跨进程同步**。
+### 2.2 借来的 IRX 代码里，我们动过的文件（共 7 个，交接时重点看）
 
-## 4. 为什么去掉「改版 android.jar」
-
-上游 `UnknownContentProvider` 直接 `implements android.content.IContentProvider`（@hide），
-必须用 [Reginer/aosp-android-jar](https://github.com/Reginer/aosp-android-jar) 替换 SDK 里的
-`android.jar` 才能编译。现在改成 `java.lang.reflect.Proxy` 动态代理（`server/SettingsHack.kt`）：
-
-* 编译期零隐藏符号 → 官方 SDK 直接能编；
-* 隐藏接口将来加方法也不会编译失败（新方法落到默认返回值）。
-
-它解决的问题没变：提权进程（无 ActivityThread 绑定）里读 Settings 会抛
-`SecurityException: Unable to find app for caller … when getting content provider settings`，
-而框架内部（如 `ViewRootImpl`）会读 Settings，一抛就崩。装上代理后实测返回默认值。
-实测确认 `Settings$ContentProviderHolder.mContentProvider` 字段在 Android 16 上仍然存在。
-
-## 5. 构建与发布
-
-### 正常 x86_64 开发机
-```bash
-cd showtaps
-./gradlew assembleDebug     # CMake + NDK 现场编译 libtaps.so
-./gradlew assembleRelease   # 签名走环境变量，见 §6（无变量则未签名）
-```
-
-### aarch64 主机（本项目的原始开发环境：手机上的 Ubuntu 沙箱）
-官方 NDK 只给 x86_64 主机工具链，所以：
-
-```bash
-NDK=/opt/android-sdk/ndk/28.2.13676358
-SYSROOT=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot
-A=$SYSROOT/usr/lib/aarch64-linux-android/29
-RT=$(ls -d $NDK/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux)
-
-cd showtaps/app/src/main/cpp
-clang++-21 --target=aarch64-linux-android29 --sysroot=$SYSROOT \
-  -std=c++17 -fPIC -shared -O2 -fvisibility=hidden -fvisibility-inlines-hidden \
-  -Wl,-Bsymbolic -Wl,--exclude-libs,ALL -s -fuse-ld=lld-21 -nodefaultlibs \
-  -Wl,--version-script=external.map.txt \
-  -o ../jniLibs/arm64-v8a/libtaps.so taps.cpp \
-  $RT/libclang_rt.builtins-aarch64-android.a -L$A -lc -llog -ldl -lm
-
-cd ../../..            # 回到 showtaps/
-gradle -PusePrebuiltNative assembleDebug
-```
-
-* 产出的 `.so` 必须 `LOAD` 段 `p_align = 0x4000`（16KB page，Android 15+ 要求）。
-  校验：`readelf -lW libtaps.so | grep LOAD`。
-* `app/src/main/jniLibs/` **不入库**（否则和 CMake 产物同名冲突，正常构建会报
-  "2 files found with path 'lib/arm64-v8a/libtaps.so'"）。
-* `local.properties` 里 aarch64 主机还要加 `cmake.dir=/usr`（用系统 cmake/ninja，
-  因为 SDK 里的 cmake/ninja 也是 x86-64），并且**不要**在 `externalNativeBuild.cmake`
-  里写死 cmake 版本号。
-* build-tools 的 `aidl` 也是 x86-64：aarch64 主机上需要用
-  `qemu-user-static` + `libc6-amd64-cross` + `libstdc++6-amd64-cross` 包一个 wrapper。
-  （`aapt2` 不用管，AGP 9.5 会从 Maven 取 `linux_arm64` 版。）
-
-### 发布
-1. 改 `app/build.gradle` 的 `versionCode` / `versionName`
-2. `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
-3. 用**同一把 keystore** 签名（见 §6），否则老用户无法覆盖安装
-4. `gh release create vX.Y-a16 --title ... --notes ... app-release.apk`
-
-## 6. 签名（走项目统一钥匙）
-
-**不要在本工程里放任何 keystore。** 签名走项目规范 `docs/KEYSTORE.md`：
-一把钥匙 `KeySigned_By_Rinkyu` 供所有需要签名的项目使用，唯一存放点
-`/data/local/tmp/ws/secure/`（root 0700），密码只有加密文件 `.pw.enc`。
-
-`app/build.gradle` 只读 4 个环境变量，由 `wskeys` 注入：
-
-| 环境变量 | 含义 |
+| 文件 | 改了什么 |
 |---|---|
-| `B50_KEYSTORE` | `.jks` 绝对路径 |
-| `B50_STORE_PASS` | 密钥库口令 |
-| `B50_ALIAS` | 别名（`KeySigned_By_Rinkyu`） |
-| `B50_KEY_PASS` | 私钥口令 |
+| `data/settings/provider/ThemeStateProviderImpl.kt` | `useMiuix = true` 写死（旧 Material3 弃用） |
+| `ui/navigation/MiuixNavWrapper.kt` | 第 3 格「记录」→「预设」；主 tab 图标换 `ic_st_home`；删 configCount 链路 |
+| `ui/navigation/InstallerNavContainer.kt` | 配置编辑路由换成 ST 自己的页面 |
+| `ui/page/miuix/settings/MiuixSettingsPage.kt` | page2 内容换成预设页；FAB 按页分派（配置页新建 / 预设页导入） |
+| `ui/page/miuix/settings/preferred/MiuixPreferredPage.kt` | 删一堆设置项；加「覆盖状态栏」开关；备份置灰 |
+| `ui/page/miuix/settings/home/priv/MiuixPrivPage.kt` | 只留 无/ROOT/Shizuku；删两块说明卡 |
+| `ui/page/miuix/settings/preferred/about/MiuixAboutPage.kt` | 图标改 1px 透明；源码链接改本仓库；许可/更新置灰 |
+
+---
+
+## 3. 构建 / 安装 / 验收
 
 ```bash
-cd showtaps
-printf '<wskeys 口令>\n' | sh /data/local/tmp/ws/wsk run -- \
-    gradle -PusePrebuiltNative assembleRelease
-```
-（x86_64 开发机上去掉 `-PusePrebuiltNative`。）
+cd /data/local/tmp/ws/projects/irx-ui
+export ANDROID_HOME=/opt/android-sdk JAVA_HOME=/usr/lib/jvm/java-21-openjdk-arm64
 
-签名后必须核验证书指纹：
-
-```bash
-apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
-# 期望：CN=Rinkyu, OU=RINIO, O=ROKUNUIGO
-# SHA-256 42:60:4E:D2:85:E0:6D:7A:B4:75:F3:DE:3B:82:7E:DF:03:66:73:71:BC:73:E2:D2:CD:D9:AC:2C:A9:D2:65:F9
+# release（推荐，性能差一个数量级，见 §6.5）
+gradle --no-daemon :app:assembleStableRelease
+# debug（仅调试用；会慢很多，别拿它评性能）
+gradle --no-daemon :app:assembleStableDebug
 ```
 
-没有环境变量时 release 构建**走未签名**（clone 下来照样能编，方便 PR/CI），
-需要可安装的包时再用 `wskeys run` 或者事后 `wskeys sign-apk <in> <out>` 重签。
+**必须只编一个 flavor（Stable）**。三个 flavor 一起编会让 sqlite 的 native 库在同一个 JVM 里加载两次 → 失败。
 
-> 已发布的 `v5.1-a16` 用的就是这把钥匙。以后发版必须继续用它，否则老用户只能卸载重装。
-
-## 7. 验证清单（改动后请重跑）
-
-1. `adb install -r` 装 debug 包 → 打开 App
-2. 授予「显示在其他应用上层」；授权 Shizuku（或 root）
-3. 点「启动」→ 5 秒内点「继续」→ 手指点屏幕，应看到彩色圆环 + 轨迹
-4. 旋转屏幕，圆环位置仍应贴合手指（`MainView.calculate()` 按 rotation 换算）
-5. 点「停止」→ 覆盖层消失（`dumpsys window windows | grep APPLICATION_OVERLAY` 应为 0）
-6. 用 `logcat -s k3x1n:KernelService:InputDevices:OverlayService:OverlayController` 看链路
-
-没有手指可用的自动化场景，可用 `sendevent` 直接注入到触摸设备节点（会同时被系统当作真实触摸，
-挑不敏感坐标）：
+安装（root shell）：
 
 ```sh
-dev=/dev/input/event7
-sendevent $dev 3 47 0; sendevent $dev 3 57 8001; sendevent $dev 1 330 1
-sendevent $dev 3 53 40000; sendevent $dev 3 54 170000; sendevent $dev 0 0 0
-# 截图核对 … 然后释放：
-sendevent $dev 3 57 -1; sendevent $dev 1 330 0; sendevent $dev 0 0 0
+pm install -r app/build/outputs/apk/Stable/release/app-Stable-release.apk
+am start -n com.show.taps.revived/com.rosan.installer.ui.activity.SettingsActivity
 ```
-（`ABS_MT_POSITION_X/Y` 的 max 用 `getevent -lp /dev/input/eventX` 查，本机是 143999 / 319999。）
 
-## 8. 实测记录（真机 Android 16 / SDK 36）
+验收清单（本次已逐项实测）：
 
-| 项 | 结果 |
+1. 桌面/关于页：应用名 **Show Taps**，版本 **1.1.1 (10101)**，关于页大图标位置**空**（1px 透明占位）
+2. 底栏：主页（自绘触点图标）/ 配置 / 预设 / 设置
+3. 设置页只剩：主题设置、覆盖状态栏、备份与还原（两条「暂不可用」）、关于
+4. 可用特权页只剩：无特权 / ROOT / Shizuku，没有说明卡
+5. 点「启动」不再弹「5 秒内点继续」
+6. 预设页右下角 + 能导入 `test-preset.json` / `test-pack-*.zip`
+7. 翻页流畅（release：p50 8ms / p90 11ms / 0% 掉帧）
+
+---
+
+## 4. 效果包引擎
+
+规范文档：`Tools/LSPilot/projects/show-taps/design/pack-spec-v1.md`（**还没进本仓库**，见 §7）
+
+能力（v1）：
+
+* 四组时间轴：`press`（按下）/ `hold`（按住，可 loop）/ `trail`（每个历史点按年龄）/ `release`（抬起）
+* 三种图层：`sprite`（贴图，缩放到 2×radius）/ `ring`（程序化圆环）/ `dot`（程序化实心圆）
+* 曲线三写法：固定值、`[from,to]`+缓动（linear/easeIn/easeOut/easeOutQuad/easeOutCubic/easeInOutQuad/backOut）、关键帧 `[[t,v],…]`
+* 混合：`plus`（加色，做发光）/ `normal` / `screen`；`tint:"auto"` 跟该手指颜色
+* 安全边界：只解析 JSON + 图片，**不执行任何代码**；单包 ≤32MB；贴图解码降到 256px；`tex` 路径禁 `..`
+
+接进引擎的链路：`StConfig.packId` → `StEngine.apply` 解析 → `StPackHolder.current` → `MainView.onDraw` 让位。
+
+---
+
+## 5. 已知问题 / 待办（按优先级）
+
+1. **签名**：现在 debug 签名。要用 `KeySigned_By_Rinkyu` 重签（口令在用户手里）；
+   换签名后必须 `pm uninstall com.show.taps.revived` 再装，配置/预设会丢。
+2. **IRX 业务层没剥**：`data/ domain/ di/` 全在，安装器/卸载器/安装流程/历史记录仍可跑（入口大多删了）。
+   仓库体积 73 个提交文件里有大半是 IRX 的。要瘦身得按 `AGENTS.md` 的路径删。
+3. **文案混杂**：通知、权限说明、安装流程里还有 InstallerX 的字符串；`values-*` 里多语言条目也还在。
+4. **通知小图标**仍是 IRX 的 `ic_notification_logo` → 换 ST 的 `ic_notification`。
+5. **关于页大图标**是 1px 透明占位，正式图标待定。
+6. **包规范文档要搬进仓库**（`docs/pack-spec-v1.md`）。
+7. baseline profile 没生成：沙箱里的 `adb` 是 x86_64 二进制，跑不了 macrobenchmark；要 x86_64 主机。
+8. 效果包引擎 v1 没做：参数面板（`params` 只是占位）、序列帧图集、粒子系统。
+
+---
+
+## 6. 踩过的坑（都是结论，不用再试一遍）
+
+### 6.1 A16 的 `openSession` 门槛
+任何不在 AMS ProcessMap 的进程（`app_process` / Shizuku 用户服务 / root shell）都无法 addView，
+报 `IllegalStateException: Unknown pid=…`，实测 2041/2039/2038/2002/2036 全灭。
+→ 覆盖层只能由 App 进程画。
+
+### 6.2 R8 会毁掉 ST 通道（这条最坑）
+`show.taps.server.*` 是 Shizuku/root **按类名字符串反射加载**的；
+`show.taps.settings.*` 是 kotlinx.serialization 数据类，字段名参与 JSON。
+没有 keep 规则时 release 包打不出来（`materialkolor` 缺类）或者打出来也不工作。
+→ `app/proguard-rules.pro` 里已 keep，别删。
+
+### 6.3 `MiuixScrollBehavior()` 不能包 `remember{}`
+它本身是 `@Composable` 且内部已经 remember。包起来会编译报
+`@Composable invocations can only happen from the context of a @Composable function`。
+
+### 6.4 `beyondViewportPageCount = 0` 更差
+试过：每次翻页都要重新组合整页（离屏即销毁），p90 反而更烂。保持 `= 1`。
+
+### 6.5 别拿 debug 包评性能
+同一测法（gfxinfo + 4 次翻页）：
+
+| | debug | release |
+|---|---|---|
+| p50 | 24–26 ms | **8 ms** |
+| p90 | 53–65 ms | **11 ms** |
+| Janky | 3–6 % | **0 %** |
+
+debug 的 `optimization.enable = false`，Compose 全靠解释执行。之前「miuix 界面卡」的结论就是这个误会。
+
+### 6.6 无障碍覆盖层（可选模式）
+`TYPE_ACCESSIBILITY_OVERLAY` = AOSP 层级 31（普通悬浮窗 2038 只有 11，状态栏是 15），
+要靠 `AccessibilityService` 给出的 token。
+* 开关在 设置 → 常规 → 覆盖状态栏（默认关）
+* HyperOS 上必须在系统「无障碍」里手动启用；`settings put secure enabled_accessibility_services` 也能生效
+  （实测写入后 90 秒仍在，开关无障碍设置页也没被回写），但用户机器上别擅自改这项设置
+* 服务声明里**没有** `canRequestTouchExplorationMode` / `canPerformGestures` / `canRetrieveWindowContent`
+
+---
+
+## 7. 设备与数据
+
+| 项 | 值 |
 |---|---|
-| Shizuku 通道 | ✅ 用户服务以 shell 身份起（本机 API 由 Sui 提供，授权选「始终(Shell)」） |
-| 设备挑选 | ✅ `pick: /dev/input/event7 (goodix_ts) weight=91`；abs: X max=143999 / Y max=319999 / slots=9 |
-| 覆盖层 | ✅ `ty=APPLICATION_OVERLAY`、`appop=SYSTEM_ALERT_WINDOW` |
-| 绘制（debug） | ✅ 注入 raw(30000–70000, 170000) → 高饱和像素 bbox (151,1163)-(636,1499)；对照图同区 0 |
-| 绘制（release） | ✅ 圆心区 (429,969)-(650,1190) 紫色 8484 px（期望直径 ≈80dp×2.625+描边 ≈223）；y<900 零杂色 |
-| 5 秒安全计时 | ✅ 不点「继续」5s 自动停；点了之后 9s 仍在 |
-| 停止流程 | ✅ 服务归零、覆盖层窗口消失 |
-| **root 通道** | ⚠ 未验证：测试机 KernelSU 未授权本 App，`su` 返回 `error=13 Permission denied` |
+| 设备 | 小米平板 23117RK66C / Android 16 / SDK 36 / 1440×3200（覆盖 1080×2400）/ density 420 |
+| root | KernelSU（`su -c` 无弹窗） |
+| Shizuku | 由 **Sui**（zygisk 模块）提供，无独立 App |
+| 已装 | `com.show.taps.revived` 1.1.1（debug 签名） |
+| 旧探针包 | `com.lspilot.irxprobe` 还在，可随时卸载 |
+| 配置数据 | `/data/data/com.show.taps.revived/files/st_configs.json`、`st_presets.json`、`st_packs/<id>/` |
+| 测试包 | `Tools/LSPilot/inbox/st-test/`（test-preset*.json / test-pack-ba.zip / test-pack-nofx.zip） |
 
-## 9. 已知问题 / 下一步（按优先级）
+---
 
-1. **root 通道端到端验证**（唯一"写了但没跑过"的主干功能）。测法：KernelSU/Magisk 里给
-   Show Taps 开 root → 卸载/停用 Shizuku → 点启动，`logcat -s RootSource:RootServer` 应看到
-   `handshake ok` 与 `reading /dev/input/eventX`。
-2. **覆盖层盖不住状态栏**：`TYPE_APPLICATION_OVERLAY` 层级在状态栏之下；上游用的
-   2041 在 A16 上已不可用。若要盖状态栏，只能换思路（例如全屏画中画、
-   或让系统级进程画），目前接受这个限制。
-3. `taps.cpp` 与 `detect_devices.h` 的 `LOGD` 宏重复定义（编译 warning，无功能影响）。
-4. 通知未申请 `POST_NOTIFICATIONS`，前台服务通知可能不可见。
-5. 上游 README 里「替换 android.jar」的说法已经过时（本仓库 README 已改写）。
-6. `TYPE_APPLICATION_OVERLAY` 窗口在部分 ROM 上可能被"隐藏悬浮窗"开关拦截，
-   需要引导用户去系统设置里放开。
-7. 快捷磁贴 / 通知内"停止"按钮 / PNG 光标 —— 上游 TODO，尚未做。
+## 8. 上游与协议
+
+* 上游 UI：`wxxsfxyzm/InstallerX-Revived`（GPL-3.0）— 本地 git 的 `origin` 还是它，**没有自己的远端**
+* 触摸引擎：`k3x1n/Android-Show-Taps` + `RONUKUIGO/Show-Taps-Revived`（GPL-3.0）
+* 本仓库：GPL-3.0，两处改动都要保留原版权头（`SPDX-License-Identifier: GPL-3.0-only` 已在文件头）
+
+搬代码时的实际义务（GPLv3，不是可选）：保留版权声明、标明修改、整体仍以 GPL-3.0 分发。
