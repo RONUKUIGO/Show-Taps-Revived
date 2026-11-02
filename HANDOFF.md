@@ -117,7 +117,7 @@ am start -n com.show.taps.revived/com.rosan.installer.ui.activity.SettingsActivi
 
 ## 4. 效果包引擎
 
-规范文档：`Tools/LSPilot/projects/show-taps/design/pack-spec-v1.md`（**还没进本仓库**，见 §7）
+规范文档：**[docs/pack-spec-v1.md](docs/pack-spec-v1.md)**（已入库；工作区另有一份镜像在 `projects/show-taps/design/`）
 
 能力（v1）：
 
@@ -140,9 +140,8 @@ am start -n com.show.taps.revived/com.rosan.installer.ui.activity.SettingsActivi
 3. **文案混杂**：通知、权限说明、安装流程里还有 InstallerX 的字符串；`values-*` 里多语言条目也还在。
 4. **通知小图标**仍是 IRX 的 `ic_notification_logo` → 换 ST 的 `ic_notification`。
 5. **关于页大图标**是 1px 透明占位，正式图标待定。
-6. **包规范文档要搬进仓库**（`docs/pack-spec-v1.md`）。
-7. baseline profile 没生成：沙箱里的 `adb` 是 x86_64 二进制，跑不了 macrobenchmark；要 x86_64 主机。
-8. 效果包引擎 v1 没做：参数面板（`params` 只是占位）、序列帧图集、粒子系统。
+6. baseline profile 没生成：沙箱里的 `adb` 是 x86_64 二进制，跑不了 macrobenchmark；要 x86_64 主机。
+7. 效果包引擎 v1 没做：参数面板（`params` 只是占位）、序列帧图集、粒子系统。
 
 ---
 

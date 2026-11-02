@@ -29,7 +29,9 @@
 - 效果包（Pack）：`pack.json` + 图片素材 + 时间曲线，声明式描述按下 / 按住 / 拖尾 / 抬起四组动效
 - **包只能声明，不能执行代码**：没有 JS、没有 shader、没有表达式求值，导入陌生包不会带来执行风险
 
-效果包规范见 `docs/pack-spec-v1.md`（在 Show-Taps-Revived 仓库的 `design/` 下）。
+效果包规范见 **[docs/pack-spec-v1.md](docs/pack-spec-v1.md)** —— 包含包结构、四组时间轴、三种图层、
+曲线三写法、混合模式、校验报错规则，以及一份「零素材」的最小示例。
+交接文档见 [HANDOFF.md](HANDOFF.md)，版本说明见 [release.txt](release.txt)。
 
 > 本仓库**不提供任何效果包**。包由使用者自行制作或导入。
 
